@@ -1,43 +1,66 @@
-# PDF Splitter — Flask + qpdf
+# PDF Splitter
 
-複数のPDFを結合し、指定サイズ（MB）以下に分割するWebアプリです。
+複数の PDF をまとめて、指定したサイズ（MB）以下のファイルに分け直す Web アプリです。
+
+メールやアップロードフォームの容量制限に引っかかる大きな PDF を、制限内に収まるように分割したいときに使います。分割には [qpdf](https://github.com/qpdf/qpdf) を使っていて、ページの中身を再圧縮・再描画しないので画質は落ちません。
 
 ## 必要なもの
 
-| ツール | インストール方法 |
-|--------|----------------|
-| Python 3.10+ | https://python.org |
-| qpdf | `brew install qpdf` / `sudo apt install qpdf` / `choco install qpdf` |
+- Python 3.10 以上
+- qpdf
 
-## セットアップと起動
-
-```bash
-# 1. 依存パッケージをインストール
-pip install -r requirements.txt
-
-# 2. 起動
-python app.py
-
-# → http://localhost:5000 をブラウザで開く
+```sh
+# macOS
+brew install qpdf
+# Ubuntu / Debian
+sudo apt install qpdf
+# Windows
+choco install qpdf
 ```
+
+## 起動
+
+```sh
+pip install -r requirements.txt
+python app.py
+```
+
+http://localhost:5000 を開いてください。ポートは環境変数 `PORT` で変えられます。
+
+### Docker
+
+```sh
+docker build -t pdf-splitter .
+docker run -p 5000:5000 -e PORT=5000 pdf-splitter
+```
+
+Dockerfile は Render などの、`PORT` を渡してくる PaaS でそのまま動くようにしてあります。
 
 ## 使い方
 
-1. PDFファイルをドラッグ＆ドロップ（複数可・順番はドラッグで並び替え可能）
-2. 分割サイズ（MB）を設定
-3. 「分割を実行する」をクリック
-4. 完了後、ファイルを個別ダウンロードまたはZIPで一括ダウンロード
+1. PDF をドラッグ＆ドロップする（複数可。ドラッグで順番を入れ替えられます）
+2. 1 ファイルあたりの上限サイズ（MB、初期値 200）と、出力ファイル名の接頭辞（初期値 `split`）を決める
+3. 「分割を実行する」を押す
+4. 終わったら、1 つずつダウンロードするか ZIP でまとめてダウンロードする
 
-## 仕組み
+出力は `split_001.pdf`, `split_002.pdf`, … のように、並べた順のページが通し番号で分かれて出てきます。入力ファイルの境目はまたいで詰めるので、小さな PDF がたくさんあってもまとめて少ないファイル数にできます。
 
-- **結合**: `qpdf --empty --pages a.pdf b.pdf -- merged.pdf`
-- **分割**: `qpdf merged.pdf --pages . 1-N -- chunk.pdf`
-- **サイズ決定**: 二分探索で各チャンクの最大ページ数を実測して確定
-- qpdfはPDFの内部バイナリ構造を書き換えないため **破損ゼロ**
+## しくみ
 
-## 本番運用する場合
+- アップロードは 50MB ずつに分けて送るので、大きなファイルでもタイムアウトしにくくなっています。
+- 各出力ファイルに何ページ入れるかは、qpdf で実際にページを切り出してサイズを測りながら、二分探索で決めています。PDF のサイズはページ数に比例しないので、見積もりではなく実測です。
+- 全ファイルを一度に結合せず、前から順に処理して、余ったページだけを次のファイルに持ち越します。メモリやディスクを使いすぎないようにするためです。
+- 出力はかならず上限サイズ未満になります。ただし、**1 ページだけで上限を超える場合** は、そのページを単独で出力します。
+- 処理後のファイルはサーバーに一時保存され、1 時間ほどで削除されます。
 
-```bash
-pip install gunicorn
-gunicorn -w 2 -b 0.0.0.0:5000 app:app
+## 注意
+
+ジョブの状態はプロセスのメモリ上に持っているので、gunicorn で動かすときは **ワーカーを 1 つ** にしてください（`-w 2` などにすると、進捗確認やダウンロードのリクエストが別のワーカーに届いて「ジョブが見つかりません」になります）。
+
+```sh
+gunicorn -w 1 --threads 4 -b 0.0.0.0:5000 app:app
 ```
+
+## ライセンス
+
+[MIT](LICENSE)
