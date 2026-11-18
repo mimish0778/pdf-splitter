@@ -1,5 +1,7 @@
 # PDF Splitter
 
+[![test](https://github.com/mimish0778/pdf-splitter/actions/workflows/test.yml/badge.svg)](https://github.com/mimish0778/pdf-splitter/actions/workflows/test.yml)
+
 複数の PDF をつなげたうえで、指定したサイズ（MB）より小さいファイルに分割する Web アプリです。Flask と [qpdf](https://qpdf.readthedocs.io/) で動作します。
 
 メールの添付やアップロードにサイズ制限があるときに、大きな PDF を制限内のファイルに分けるといった用途を想定しています。
@@ -98,7 +100,18 @@ qpdf --empty --pages a.pdf 1-5 b.pdf 1-20 -- output.pdf
 | `GET` | `/api/download/<job_id>/<filename>` | 出力ファイルを 1 つダウンロードする |
 | `GET` | `/api/download_zip/<job_id>` | すべての出力ファイルを ZIP でダウンロードする |
 
-分割はバックグラウンドのスレッドで実行されます。ジョブ ID には `session_id` がそのまま使われます。
+分割はバックグラウンドのスレッドで実行されます。ジョブ ID には `session_id` がそのまま使われます。`session_id` が UUID でない場合や、`size_mb` が 0 以下の場合など、入力が正しくないときは 400 を返します。
+
+## テスト
+
+pytest でテストを実行できます。qpdf が必要です。テスト用の PDF は実行時に生成します。
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+結合の順序、各ファイルが指定サイズ未満になること、1 ページで上限を超える場合の扱い、壊れた PDF、不正な入力、作業ディレクトリの外のファイルを読めないことを確認しています。GitHub Actions で push ごとに実行しています。
 
 ## デプロイ
 

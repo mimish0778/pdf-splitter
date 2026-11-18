@@ -1,0 +1,7 @@
+.git
+.github
+tests
+requirements-dev.txt
+images
+__pycache__
+venv

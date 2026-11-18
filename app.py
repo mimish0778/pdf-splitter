@@ -7,6 +7,7 @@ PDF Splitter — Flask + qpdf  (Render Docker 対応)
 """
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -262,13 +263,18 @@ def upload_chunk():
     """50MB ずつチャンクでアップロードを受け取る。"""
     cleanup_old_jobs()
     sid          = request.form.get("session_id", "")
-    chunk_index  = int(request.form.get("chunk_index", 0))
-    total_chunks = int(request.form.get("total_chunks", 1))
     filename     = Path(request.form.get("filename", "file.pdf")).name
     data         = request.files.get("data")
+    try:
+        chunk_index  = int(request.form.get("chunk_index", 0))
+        total_chunks = int(request.form.get("total_chunks", 1))
+    except ValueError:
+        return jsonify({"error": "chunk_index と total_chunks は整数で指定してください"}), 400
 
     if not sid or not data:
         return jsonify({"error": "パラメータ不足"}), 400
+    if chunk_index < 0 or total_chunks < 1 or chunk_index >= total_chunks:
+        return jsonify({"error": "chunk_index が範囲外です"}), 400
     if not valid_session_id(sid):
         return jsonify({"error": "session_id が不正です"}), 400
 
@@ -287,10 +293,17 @@ def upload_chunk():
 def finalize():
     """全チャンク受信後に分割ジョブを開始する。"""
     sid        = request.form.get("session_id", "")
-    size_mb    = float(request.form.get("size_mb", 200))
     # 出力ファイル名に使うので、ディレクトリ部分を取り除く
     prefix     = Path(request.form.get("prefix", "split").strip()).name or "split"
-    file_order = json.loads(request.form.get("file_order", "[]"))
+    try:
+        size_mb    = float(request.form.get("size_mb", 200))
+        file_order = json.loads(request.form.get("file_order", "[]"))
+    except ValueError:  # json.JSONDecodeError も ValueError の一種
+        return jsonify({"error": "size_mb または file_order の形式が正しくありません"}), 400
+    if not math.isfinite(size_mb) or size_mb <= 0:
+        return jsonify({"error": "size_mb には 0 より大きい数を指定してください"}), 400
+    if not isinstance(file_order, list) or not all(isinstance(fn, str) for fn in file_order):
+        return jsonify({"error": "file_order はファイル名の配列で指定してください"}), 400
 
     if not sid:
         return jsonify({"error": "session_id がありません"}), 400
