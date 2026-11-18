@@ -37,6 +37,8 @@ CHUNK_MB = 50    # ブラウザが 1 回に送るチャンクの大きさ（temp
 app.config["MAX_CONTENT_LENGTH"] = (CHUNK_MB + 1) * 1024 * 1024
 # 1 つのセッションでアップロードできる合計サイズ。ディスクを使い切られないようにする
 MAX_UPLOAD_BYTES = int(float(os.environ.get("MAX_UPLOAD_MB", 2048)) * 1024 * 1024)
+# セッションを変えれば上の上限は回避できるので、サーバー全体でもディスクの空きを必ず残す
+MIN_FREE_BYTES = int(float(os.environ.get("MIN_FREE_MB", 1024)) * 1024 * 1024)
 
 # アップロードするファイル名。ブラウザは英数字と . _ - だけにした名前を送ってくる
 FILENAME_RE = re.compile(r"[A-Za-z0-9._-]{1,200}")
@@ -344,6 +346,8 @@ def upload_chunk():
         existing -= fsize(dest)  # 同じファイルを最初から送り直す場合は上書きになる
     if existing + len(chunk) > MAX_UPLOAD_BYTES:
         return jsonify({"error": f"アップロードできる合計サイズ（{MAX_UPLOAD_BYTES // 1024 // 1024} MB）を超えています"}), 413
+    if shutil.disk_usage(WORK_ROOT).free - len(chunk) < MIN_FREE_BYTES:
+        return jsonify({"error": "サーバーの空き容量が足りません。時間をおいて試してください"}), 507
 
     mode = "ab" if chunk_index > 0 else "wb"
     with open(dest, mode) as f:

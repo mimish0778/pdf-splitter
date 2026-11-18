@@ -173,3 +173,14 @@ def test_upload_rejects_oversized_request(client, monkeypatch):
     })
     assert r.status_code == 413
     assert "error" in r.get_json()
+
+
+def test_upload_keeps_free_disk_space(client, monkeypatch):
+    # セッションごとの上限はセッションを変えると回避できるので、全体の空き容量でも止める
+    free = app_module.shutil.disk_usage(app_module.WORK_ROOT).free
+    monkeypatch.setattr(app_module, "MIN_FREE_BYTES", free)
+    r = client.post("/api/upload_chunk", content_type="multipart/form-data", data={
+        "session_id": str(uuid.uuid4()), "chunk_index": "0", "total_chunks": "1",
+        "filename": "a.pdf", "data": (io.BytesIO(b"x" * 100), "a.pdf"),
+    })
+    assert r.status_code == 507
