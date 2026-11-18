@@ -38,7 +38,7 @@ app.config["MAX_CONTENT_LENGTH"] = (CHUNK_MB + 1) * 1024 * 1024
 # 1 つのセッションでアップロードできる合計サイズ。ディスクを使い切られないようにする
 MAX_UPLOAD_BYTES = int(float(os.environ.get("MAX_UPLOAD_MB", 2048)) * 1024 * 1024)
 # セッションを変えれば上の上限は回避できるので、サーバー全体でもディスクの空きを必ず残す
-MIN_FREE_BYTES = int(float(os.environ.get("MIN_FREE_MB", 1024)) * 1024 * 1024)
+MIN_FREE_BYTES = int(float(os.environ.get("MIN_FREE_MB", 256)) * 1024 * 1024)
 
 # アップロードするファイル名。ブラウザは英数字と . _ - だけにした名前を送ってくる
 FILENAME_RE = re.compile(r"[A-Za-z0-9._-]{1,200}")
