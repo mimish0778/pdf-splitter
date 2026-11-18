@@ -101,9 +101,13 @@ def test_broken_pdf_reports_error(client):
     {"session_id": "../../etc", "chunk_index": "0", "total_chunks": "1"},
     {"session_id": str(uuid.uuid4()), "chunk_index": "x", "total_chunks": "1"},
     {"session_id": str(uuid.uuid4()), "chunk_index": "1", "total_chunks": "1"},
+    {"session_id": str(uuid.uuid4()), "chunk_index": "0", "total_chunks": "1", "filename": ".."},
+    {"session_id": str(uuid.uuid4()), "chunk_index": "0", "total_chunks": "1", "filename": "."},
+    {"session_id": str(uuid.uuid4()), "chunk_index": "0", "total_chunks": "1", "filename": ""},
+    {"session_id": str(uuid.uuid4()), "chunk_index": "0", "total_chunks": "1", "filename": "../a.pdf"},
 ])
 def test_upload_rejects_invalid_input(client, form):
-    data = {**form, "filename": "a.pdf", "data": (io.BytesIO(b"%PDF"), "a.pdf")}
+    data = {"filename": "a.pdf", **form, "data": (io.BytesIO(b"%PDF"), "a.pdf")}
     r = client.post("/api/upload_chunk", data=data, content_type="multipart/form-data")
     assert r.status_code == 400
 
@@ -145,3 +149,27 @@ def test_cleanup_removes_abandoned_uploads(client):
 
     assert not (app_module.WORK_ROOT / abandoned).exists()
     assert (app_module.WORK_ROOT / recent / "uploads" / "a.pdf").exists()
+
+
+def test_upload_rejects_total_size_over_limit(client, monkeypatch):
+    monkeypatch.setattr(app_module, "MAX_UPLOAD_BYTES", 1000)
+    sid = str(uuid.uuid4())
+    upload(client, sid, "a.pdf", b"x" * 600)
+    r = client.post("/api/upload_chunk", content_type="multipart/form-data", data={
+        "session_id": sid, "chunk_index": "0", "total_chunks": "1",
+        "filename": "b.pdf", "data": (io.BytesIO(b"x" * 600), "b.pdf"),
+    })
+    assert r.status_code == 413
+    assert "合計サイズ" in r.get_json()["error"]
+    # 同じファイルを最初から送り直すのは上書きなので、合計に二重に数えない
+    upload(client, sid, "a.pdf", b"x" * 600)
+
+
+def test_upload_rejects_oversized_request(client, monkeypatch):
+    monkeypatch.setitem(app_module.app.config, "MAX_CONTENT_LENGTH", 1000)
+    r = client.post("/api/upload_chunk", content_type="multipart/form-data", data={
+        "session_id": str(uuid.uuid4()), "chunk_index": "0", "total_chunks": "1",
+        "filename": "a.pdf", "data": (io.BytesIO(b"x" * 5000), "a.pdf"),
+    })
+    assert r.status_code == 413
+    assert "error" in r.get_json()

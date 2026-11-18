@@ -9,6 +9,7 @@ PDF Splitter — Flask + qpdf  (Render Docker 対応)
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -31,6 +32,15 @@ WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 JOB_TTL = 3600   # 1時間でジョブ削除
 
+CHUNK_MB = 50    # ブラウザが 1 回に送るチャンクの大きさ（templates/index.html の CHUNK_SIZE と合わせる）
+# 1 回のリクエストの上限。チャンク本体にフォームの項目の分を足した大きさ
+app.config["MAX_CONTENT_LENGTH"] = (CHUNK_MB + 1) * 1024 * 1024
+# 1 つのセッションでアップロードできる合計サイズ。ディスクを使い切られないようにする
+MAX_UPLOAD_BYTES = int(float(os.environ.get("MAX_UPLOAD_MB", 2048)) * 1024 * 1024)
+
+# アップロードするファイル名。ブラウザは英数字と . _ - だけにした名前を送ってくる
+FILENAME_RE = re.compile(r"[A-Za-z0-9._-]{1,200}")
+
 
 def valid_session_id(sid: str) -> bool:
     """session_id はブラウザが crypto.randomUUID() で作る UUID だけを受け付ける。
@@ -39,6 +49,21 @@ def valid_session_id(sid: str) -> bool:
         return str(uuid.UUID(sid)) == sid.lower()
     except ValueError:
         return False
+
+
+def valid_filename(name: str) -> bool:
+    return bool(FILENAME_RE.fullmatch(name)) and name.strip(".") != ""
+
+
+def dir_size(path: Path) -> int:
+    total = 0
+    for p in path.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except FileNotFoundError:
+            pass
+    return total
 
 
 # ─── qpdf ヘルパー ────────────────────────────────────────────
@@ -277,6 +302,11 @@ def split_worker(job_id: str, pdf_paths: list,
 
 # ─── Flask ルート ─────────────────────────────────────────────
 
+@app.errorhandler(413)
+def too_large(_e):
+    return jsonify({"error": f"1 回に送れるのは {CHUNK_MB} MB までです"}), 413
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -287,7 +317,7 @@ def upload_chunk():
     """50MB ずつチャンクでアップロードを受け取る。"""
     cleanup_old_jobs()
     sid          = request.form.get("session_id", "")
-    filename     = Path(request.form.get("filename", "file.pdf")).name
+    filename     = request.form.get("filename", "file.pdf")
     data         = request.files.get("data")
     try:
         chunk_index  = int(request.form.get("chunk_index", 0))
@@ -301,14 +331,23 @@ def upload_chunk():
         return jsonify({"error": "chunk_index が範囲外です"}), 400
     if not valid_session_id(sid):
         return jsonify({"error": "session_id が不正です"}), 400
+    if not valid_filename(filename):
+        return jsonify({"error": "ファイル名は英数字と . _ - だけで指定してください"}), 400
 
     upload_dir = WORK_ROOT / sid / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     dest = upload_dir / filename
+    chunk = data.read()
+    existing = dir_size(upload_dir)
+    if chunk_index == 0 and dest.exists():
+        existing -= fsize(dest)  # 同じファイルを最初から送り直す場合は上書きになる
+    if existing + len(chunk) > MAX_UPLOAD_BYTES:
+        return jsonify({"error": f"アップロードできる合計サイズ（{MAX_UPLOAD_BYTES // 1024 // 1024} MB）を超えています"}), 413
+
     mode = "ab" if chunk_index > 0 else "wb"
     with open(dest, mode) as f:
-        f.write(data.read())
+        f.write(chunk)
 
     return jsonify({"received": chunk_index + 1, "done": chunk_index == total_chunks - 1})
 
@@ -339,8 +378,8 @@ def finalize():
         return jsonify({"error": "アップロードデータが見つかりません"}), 404
 
     pdf_paths = (
-        [str(upload_dir / Path(fn).name) for fn in file_order
-         if (upload_dir / Path(fn).name).exists()]
+        [str(upload_dir / fn) for fn in dict.fromkeys(file_order)  # 同じ名前は 1 回だけ
+         if valid_filename(fn) and (upload_dir / fn).exists()]
         if file_order else
         sorted(str(p) for p in upload_dir.glob("*.pdf"))
     )

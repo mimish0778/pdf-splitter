@@ -217,7 +217,7 @@ function renderList() {
     const d = document.createElement('div');
     d.className = 'file-row'; d.draggable = true; d.dataset.i = i;
     d.innerHTML = `<span class="fi">📄</span>
-      <span class="fn">${f.name}</span>
+      <span class="fn">${esc(f.name)}</span>
       <span class="fs">${fmt(f.size)}</span>
       <button class="rm" data-i="${i}">✕</button>`;
     el.appendChild(d);
@@ -284,7 +284,11 @@ async function uploadAllFiles(sessionId) {
       fd.append('data',        blob, safeFilename);
 
       const res = await fetch('/api/upload_chunk', {method:'POST', body:fd});
-      if (!res.ok) throw new Error(`アップロード失敗: ${file.name} chunk ${ci}`);
+      if (!res.ok){
+        let detail = '';
+        try { detail = (await res.json()).error || ''; } catch(e){}
+        throw new Error(`アップロード失敗: ${file.name} chunk ${ci}` + (detail ? ` — ${detail}` : ''));
+      }
 
       uploaded += blob.size;
       const pct = uploaded / total * 100;
@@ -372,9 +376,9 @@ function showResults(files){
   files.forEach(name=>{
     const a = document.createElement('a');
     a.className='result-item';
-    a.href=`/api/download/${currentJobId}/${name}`;
+    a.href=`/api/download/${encodeURIComponent(currentJobId)}/${encodeURIComponent(name)}`;
     a.download=name;
-    a.innerHTML=`<span class="ri">📄</span><div class="rn">${name}</div>`;
+    a.innerHTML=`<span class="ri">📄</span><div class="rn">${esc(name)}</div>`;
     grid.appendChild(a);
   });
   document.getElementById('result-card').style.display='block';
