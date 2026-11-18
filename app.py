@@ -72,6 +72,17 @@ def fsize(path) -> int:
     return os.path.getsize(str(path))
 
 
+def last_modified(path: Path) -> float:
+    """ディレクトリの中で最後に更新されたファイルの時刻（中身がなければディレクトリ自体の時刻）。"""
+    latest = path.stat().st_mtime
+    for p in path.rglob("*"):
+        try:
+            latest = max(latest, p.stat().st_mtime)
+        except FileNotFoundError:
+            pass
+    return latest
+
+
 def cleanup_old_jobs():
     now = time.time()
     with jobs_lock:
@@ -81,6 +92,19 @@ def cleanup_old_jobs():
         with jobs_lock:
             jobs.pop(jid, None)
         shutil.rmtree(WORK_ROOT / jid, ignore_errors=True)
+
+    # 分割を実行しなかったアップロード（途中でタブを閉じた場合など）や、サーバーの再起動で
+    # jobs から消えたジョブの作業ディレクトリも、一定時間更新がなければ削除する
+    with jobs_lock:
+        known = set(jobs)
+    for d in WORK_ROOT.iterdir():
+        if not d.is_dir() or d.name in known:
+            continue
+        try:
+            if now - last_modified(d) > JOB_TTL:
+                shutil.rmtree(d, ignore_errors=True)
+        except FileNotFoundError:
+            pass
 
 
 # ─── 分割ワーカー ─────────────────────────────────────────────

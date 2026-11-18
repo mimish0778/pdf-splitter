@@ -130,3 +130,18 @@ def test_download_cannot_escape_output_directory(client):
     wait_for_job(client, r.get_json()["job_id"])
     assert client.get(f"/api/download/{sid}/..%2F..%2Fuploads%2Fa.pdf").status_code == 404
     assert client.get(f"/api/download/{uuid.uuid4()}/out_001.pdf").status_code == 404
+
+
+def test_cleanup_removes_abandoned_uploads(client):
+    old = time.time() - app_module.JOB_TTL - 60
+    abandoned = str(uuid.uuid4())   # アップロードだけして分割しなかったセッション
+    recent = str(uuid.uuid4())      # アップロード中のセッション
+    upload(client, abandoned, "a.pdf", make_pdf(1, "A"))
+    upload(client, recent, "a.pdf", make_pdf(1, "A"))
+    for p in [app_module.WORK_ROOT / abandoned, *(app_module.WORK_ROOT / abandoned).rglob("*")]:
+        os.utime(p, (old, old))
+
+    app_module.cleanup_old_jobs()
+
+    assert not (app_module.WORK_ROOT / abandoned).exists()
+    assert (app_module.WORK_ROOT / recent / "uploads" / "a.pdf").exists()
