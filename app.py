@@ -31,6 +31,15 @@ WORK_ROOT.mkdir(parents=True, exist_ok=True)
 JOB_TTL = 3600   # 1時間でジョブ削除
 
 
+def valid_session_id(sid: str) -> bool:
+    """session_id はブラウザが crypto.randomUUID() で作る UUID だけを受け付ける。
+    パスの一部に使うため、"../" や絶対パスで作業ディレクトリの外に出られないようにする。"""
+    try:
+        return str(uuid.UUID(sid)) == sid.lower()
+    except ValueError:
+        return False
+
+
 # ─── qpdf ヘルパー ────────────────────────────────────────────
 
 def get_page_count(pdf_path: str) -> int:
@@ -228,11 +237,11 @@ def split_worker(job_id: str, pdf_paths: list,
                 f"\n✅ 完了！ {len(output_files)} ファイルを生成しました"
             )
 
-    except Exception as e:
-        import traceback
+    except Exception:
+        app.logger.exception("split job %s failed", job_id)
         with jobs_lock:
             jobs[job_id]["status"] = "error"
-            jobs[job_id]["log"].append(f"❌ エラー: {e}\n{traceback.format_exc()}")
+            jobs[job_id]["log"].append("❌ エラー: 分割に失敗しました。PDF が壊れていないか確認してください")
 
     finally:
         for p in pdf_paths:
@@ -260,6 +269,8 @@ def upload_chunk():
 
     if not sid or not data:
         return jsonify({"error": "パラメータ不足"}), 400
+    if not valid_session_id(sid):
+        return jsonify({"error": "session_id が不正です"}), 400
 
     upload_dir = WORK_ROOT / sid / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -277,18 +288,22 @@ def finalize():
     """全チャンク受信後に分割ジョブを開始する。"""
     sid        = request.form.get("session_id", "")
     size_mb    = float(request.form.get("size_mb", 200))
-    prefix     = request.form.get("prefix", "split").strip() or "split"
+    # 出力ファイル名に使うので、ディレクトリ部分を取り除く
+    prefix     = Path(request.form.get("prefix", "split").strip()).name or "split"
     file_order = json.loads(request.form.get("file_order", "[]"))
 
     if not sid:
         return jsonify({"error": "session_id がありません"}), 400
+    if not valid_session_id(sid):
+        return jsonify({"error": "session_id が不正です"}), 400
 
     upload_dir = WORK_ROOT / sid / "uploads"
     if not upload_dir.exists():
         return jsonify({"error": "アップロードデータが見つかりません"}), 404
 
     pdf_paths = (
-        [str(upload_dir / fn) for fn in file_order if (upload_dir / fn).exists()]
+        [str(upload_dir / Path(fn).name) for fn in file_order
+         if (upload_dir / Path(fn).name).exists()]
         if file_order else
         sorted(str(p) for p in upload_dir.glob("*.pdf"))
     )
