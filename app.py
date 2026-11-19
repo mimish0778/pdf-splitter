@@ -395,6 +395,11 @@ def finalize():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with jobs_lock:
+        # 同じセッションで分割中のジョブがあるときは受け付けない。
+        # 二重送信で 2 つのスレッドが同じ出力ディレクトリに書き込むのを防ぐ
+        running = jobs.get(job_id)
+        if running and running["status"] == "running":
+            return jsonify({"error": "このアップロードは分割中です"}), 409
         jobs[job_id] = {
             "status"      : "running",
             "progress"    : 0,

@@ -102,7 +102,7 @@ qpdf --empty --pages a.pdf 1-5 b.pdf 1-20 -- output.pdf
 | `GET` | `/api/download/<job_id>/<filename>` | 出力ファイルを 1 つダウンロードする |
 | `GET` | `/api/download_zip/<job_id>` | すべての出力ファイルを ZIP でダウンロードする |
 
-分割はバックグラウンドのスレッドで実行されます。ジョブ ID には `session_id` がそのまま使われます。`session_id` が UUID でない場合や、`size_mb` が 0 以下の場合など、入力が正しくないときは 400 を返します。
+分割はバックグラウンドのスレッドで実行されます。ジョブ ID には `session_id` がそのまま使われます。`session_id` が UUID でない場合や、`size_mb` が 0 以下の場合など、入力が正しくないときは 400 を返します。同じ `session_id` の分割が終わる前にもう一度 `/api/finalize` を送ると、409 を返します。
 
 ## テスト
 

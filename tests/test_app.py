@@ -183,3 +183,19 @@ def test_upload_keeps_free_disk_space(client, monkeypatch):
         "filename": "a.pdf", "data": (io.BytesIO(b"x" * 100), "a.pdf"),
     })
     assert r.status_code == 507
+
+
+def test_finalize_rejects_second_request_while_running(client):
+    sid = str(uuid.uuid4())
+    upload(client, sid, "a.pdf", make_pdf(5, "A"))
+    # 分割中の状態を作る（スレッドの進み具合に左右されないよう、ジョブを直接 running にする）
+    with app_module.jobs_lock:
+        app_module.jobs[sid] = {"status": "running", "progress": 0, "log": [],
+                                "output_files": [], "output_dir": "", "created_at": time.time()}
+    r = client.post("/api/finalize", data={"session_id": sid, "size_mb": "1", "file_order": '["a.pdf"]'})
+    assert r.status_code == 409
+    with app_module.jobs_lock:
+        app_module.jobs[sid]["status"] = "done"
+    r = client.post("/api/finalize", data={"session_id": sid, "size_mb": "1", "file_order": '["a.pdf"]'})
+    assert r.status_code == 200
+    assert wait_for_job(client, sid)["status"] == "done"
